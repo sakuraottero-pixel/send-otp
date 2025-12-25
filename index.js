@@ -3,18 +3,15 @@ import fetch from "node-fetch";
 import crypto from "crypto";
 import cors from "cors";
 
-
 const app = express();
-app.use(cors());    
+app.use(cors());        // enable cross-origin requests
 app.use(express.json());
 
 // Env vars
-const { API_KEY, API_SECRET, APP_ID } = process.env;
+const { API_KEY, API_SECRET, APP_ID_SMS1, APP_ID_SMS2 } = process.env;
 
-// OTP store (production: Redis/DB)
+// OTP store (in-memory)
 const otpStore = new Map();
-
-// Rate limit map
 const rateLimit = new Map();
 
 // Generate 6-digit OTP
@@ -22,10 +19,10 @@ const genOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 // Send OTP endpoint
 app.post("/send-otp", async (req, res) => {
-  const { number } = req.body;
+  const { number, useSms2 } = req.body; // useSms2 = true for sms-2 (WhatsApp)
   if (!number) return res.status(400).json({ error: "Number required" });
 
-  // Rate limit check: 1 OTP / 60 sec
+  // Rate limit: 1 OTP per 60 seconds
   const lastSent = rateLimit.get(number);
   if (lastSent && Date.now() - lastSent < 60 * 1000)
     return res.status(429).json({ error: "Wait 60 seconds before requesting again" });
@@ -33,11 +30,10 @@ app.post("/send-otp", async (req, res) => {
   const otp = genOTP();
   const msg = `Your OTP is ${otp}. Valid for 5 minutes.`;
 
+  const appId = useSms2 ? APP_ID_SMS2 : APP_ID_SMS1;
+
   const timestamp = Math.floor(Date.now() / 1000).toString();
-  const sign = crypto
-    .createHash("md5")
-    .update(API_KEY + API_SECRET + timestamp)
-    .digest("hex");
+  const sign = crypto.createHash("md5").update(API_KEY + API_SECRET + timestamp).digest("hex");
 
   try {
     const r = await fetch("https://api.laaffic.com/v3/sendSms", {
@@ -49,7 +45,7 @@ app.post("/send-otp", async (req, res) => {
         "Sign": sign
       },
       body: JSON.stringify({
-        appId: APP_ID,
+        appId,
         numbers: number,
         content: msg,
         senderId: "Promo Shop",
@@ -59,7 +55,6 @@ app.post("/send-otp", async (req, res) => {
 
     const data = await r.json();
 
-    // Save OTP & timestamp
     otpStore.set(number, { otp, expires: Date.now() + 5 * 60 * 1000 });
     rateLimit.set(number, Date.now());
 
@@ -69,7 +64,7 @@ app.post("/send-otp", async (req, res) => {
   }
 });
 
-// Verify OTP
+// Verify OTP endpoint
 app.post("/verify-otp", (req, res) => {
   const { number, otp } = req.body;
   const record = otpStore.get(number);
@@ -83,4 +78,4 @@ app.post("/verify-otp", (req, res) => {
 });
 
 // Start server
-app.listen(3000, () => console.log("OTP server running"));
+app.listen(3000, () => console.log("OTP server running with CORS"));
