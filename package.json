@@ -1,5 +1,5 @@
 {
-  "name": "otp-sms",
+  "name": "otp-backend",
   "type": "module",
   "scripts": {
     "start": "node index.js"
